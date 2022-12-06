@@ -5,3 +5,4 @@ out
 gen
 
 /.DS_Store
+!/src/Main.java
