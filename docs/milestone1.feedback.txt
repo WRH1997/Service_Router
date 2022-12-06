@@ -1,0 +1,23 @@
+
+- On data for the distribution hubs, remember that an employee can report repair time and say that the hub is in service with less repair time than the original estimate.  Be ready to store this notion of being in service somewhere, likely independent of the repair time listed as needed (or to clear the repair time needed when an employee says that the hub is now in service).
+
+- You talk about storing the hub information in a database, in files, and in data structures.  You should start converging on one of them.  One thing that you mentioned is having the database tell you which hubs are within a distance of you.  You might want to test that out on a small test table first to then decide on whether or not you want that as part of your design.
+
+- On algorithms for storing distribution hubs, start thinking about how you'll link many postal codes to one hub.  If in a database, you'll probably want a separate table just for that.
+
+- Your algorithm section is noting certain information that you'll need compute.  Take the next step in making a first guess at how or where you'll store that information.  
+
+- For some algorithms, like calculating the most underserved areas, start thinking about whether an SQL query could answer this for you or whether you'll need to write some algorithm in code to do it for you.  You should have a rough feel for the operations at this level to identify which ones will require some algorithmic thought (and so need time to code in Java) versus those that a good database design might solve....and so worth investing in the design of the database early.
+
+- On the path for fixing order, had you included more details on where you think the algorithm is doing then I could have given more feedback on it.
+
+- Some of the items you're listing as additional assumptions are not actually assumptions.  They are choices on behaviour that you are making and should be identified as part of design choices rather than assumptions.
+
+- From these added "assumptions", it appears that you're doing error handling strictly with error codes.  That's worth mentioning, if that's the choice you're sticking with.
+
+- I'm not as sure about adding a distribution hub without postal codes should be an error.  If they're just building the hub then it may not be connected into the power grid yet, but we'd want to track its existence.
+
+- On your repair time logic, I'm not convinced that a repair time that exceeds the remaining repair time is a problem.  Remember, the damage time is an estimate of the repair time.  When you get to fixing the hub, it could be that the fix was easier than expected, so the hub is in service even if it took less time to repair than estimated.  Similarly, when you get to fixing the hub, the problem could be worse than expected so you may need to work longer at it than estimated....how would you handle that very likely real condition?
+
+- On inService for the repair parameter, your interpretation makes the inService parameter redundant...basically equating the boolean value to "damage estimate time == 0?"
+
