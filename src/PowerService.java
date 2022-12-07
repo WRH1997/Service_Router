@@ -1,8 +1,8 @@
 import java.io.IOException;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.*;
 
-public class PowerService {
+public class PowerService{
 
     private Map<String, DamagedPostalCodes> postalCodes;
     private Map<String, HubImpact> distributionHubs;
@@ -223,7 +223,7 @@ public class PowerService {
         catch(SQLException e){
             throw new SQLException("SQL update to DistributionHubs table failed!\nSource: hubDamage\nDetails: " + e.getMessage());
         }
-        try{
+        /*try{
             Set<String> servicedAreas = distributionHubs.get(hubIdentifier).getServicedAreas();
             distributionHubs.get(hubIdentifier).setPopulationEffected(db.calculatePopulationEffected(hubIdentifier, servicedAreas));
             Iterator itr = servicedAreas.iterator();
@@ -234,7 +234,7 @@ public class PowerService {
         }
         catch(SQLException e){
             throw new SQLException("SQL select from DistributionHubs, PostalCodes, PostalHubRelation tables failed!\nSource: hubDamage\nDetails: " + e.getMessage());
-        }
+        }*/
         try{
             hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
             hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
@@ -295,8 +295,8 @@ public class PowerService {
                 throw new SQLException("SQL Update on DistributionHubs table failed!\nSource: hubRepair \nDetails: " + e.getMessage());
             }
             try{
-                hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
-                hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
+                //hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
+                //hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
                 Iterator itr = hub.getServicedAreas().iterator();
                 while(itr.hasNext()){
                     String postalCode = (String) itr.next();
@@ -339,12 +339,18 @@ public class PowerService {
         float totalPeopleOutOfService = 0;
         try{
             for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
-                float postalCodePopOutOfService = db.postalPopulationOutOfService(entry.getKey());
+                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());
                 totalPeopleOutOfService += entry.getValue().getPopulation() * postalCodePopOutOfService;
             }
         }
         catch(SQLException e){
             throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
+        }
+        try{
+            totalPeopleOutOfService += db.postalPopulationWithoutHubOutOfService();
+        }
+        catch(SQLException e){
+            throw new SQLException("SQL join/select from PostalCodes and PostalHubRelation failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
         }
         int peopleOutOfService = (int) Math.ceil(totalPeopleOutOfService);
         return peopleOutOfService;
@@ -428,11 +434,10 @@ public class PowerService {
                     float impact = populationEffected / entry.getValue().getRepairTime();
                     entry.getValue().setImpact(impact);
                     entry.getValue().setPopulationEffected(populationEffected);
-                    if(impact<=0){
+                    /*if(impact<=0){
                         continue;
-                    }
-                    float restorationPerHour = impact / entry.getValue().getRepairTime();
-                    hubImpacts.put(entry.getKey(), restorationPerHour);
+                    }*/
+                    hubImpacts.put(entry.getKey(), impact);
                 }
                 catch(SQLException e){
                     throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: fixOrder\nDetails: " + e.getMessage());
@@ -580,6 +585,9 @@ public class PowerService {
         if(increment<0.001){
             throw new IllegalArgumentException("Increment is too small (less than 0.001) [Invalid: granularity issue]!\nSource: rateOfServiceRestoration");
         }
+        if(distributionHubs.isEmpty()){
+            throw new IllegalArgumentException("No distribution hubs exists (invalid) [will create infinite list of zeroes]!\nSource: rateOfServiceRestoration");
+        }
         List<Integer> rateOfRestoration = new ArrayList<>();
         float size = 0;
         while(size<=1){
@@ -592,15 +600,30 @@ public class PowerService {
                 size = 1;
             }
         }
-        if(distributionHubs.isEmpty()){
-            return rateOfRestoration;
-        }
         List<HubImpact> fixOrder = fixOrder(distributionHubs.size());
+        for(int i=fixOrder.size()-1; i>=0; i--){
+            if(fixOrder.get(i).getImpact()==0){
+                fixOrder.remove(i);
+            }
+            else{
+                break;
+            }
+        }
         if(fixOrder.isEmpty()){
             return rateOfRestoration;
         }
         int totalPopulation = getTotalPopulation();
-        int populationOutOfService = peopleOutOfService();
+        float populationOutOfServiceFloat = 0;
+        try{
+            for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
+                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());
+                populationOutOfServiceFloat += entry.getValue().getPopulation() * postalCodePopOutOfService;
+            }
+        }
+        catch(SQLException e){
+            throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
+        }
+        int populationOutOfService = (int) Math.ceil(populationOutOfServiceFloat);
         if(populationOutOfService==0 /*|| totalPopulation==0*/){
             return rateOfRestoration;
         }
@@ -622,6 +645,7 @@ public class PowerService {
             while(percentageOfInServicePop>=currIncrement){
                 if(currIncrement==1){
                     rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
+                    currIncrement = -1;
                     break;
                 }
                 rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
@@ -637,10 +661,26 @@ public class PowerService {
     }
 
 
-     private int getTotalPopulation(){
+    private int getTotalPopulation(){
         int totalPopulation = 0;
         for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
-            totalPopulation += entry.getValue().getPopulation();
+            for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){
+                Set<String> servicedAreas = hub.getValue().getServicedAreas();
+                Iterator itr = servicedAreas.iterator();
+                boolean postalIsServiced = false;
+                while(itr.hasNext()){
+                    String postalCode = (String) itr.next();
+                    if(postalCode.equals(entry.getKey())){
+                        totalPopulation += entry.getValue().getPopulation();
+                        postalIsServiced = true;
+                        break;
+                    }
+                }
+                if(postalIsServiced){
+                    break;
+                }
+            }
+            //totalPopulation += entry.getValue().getPopulation();
         }
         return totalPopulation;
     }

@@ -1,8 +1,6 @@
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
 import java.sql.*;
 import java.util.*;
+import java.io.*;
 
 public class Database {
 
@@ -281,7 +279,8 @@ public class Database {
     }
 
 
-    float postalPopulationOutOfService(String postalCode) throws SQLException{
+
+    float postalPopulationWithHubOutOfService(String postalCode) throws SQLException{
         int totalHubs = 0;
         int damagedHubs = 0;
         try{
@@ -307,6 +306,23 @@ public class Database {
         return downedHubPercentage;
     }
 
+
+    float postalPopulationWithoutHubOutOfService() throws SQLException{
+        int populationOutOfService = 0;
+        try{
+            Connection conn = getConnection();
+            Statement statement = conn.createStatement();
+            statement.execute(useDB);
+            ResultSet res = statement.executeQuery("select * from PostalCodes left join PostalHubRelation on PostalCodes.id = PostalHubRelation.postalId where hubId is null");
+            while(res.next()){
+                populationOutOfService += res.getInt("population");
+            }
+        }
+        catch(SQLException e){
+            throw e;
+        }
+        return populationOutOfService;
+    }
 
     void updateRepairLog(String employeeId, String hubId, float repairTime, boolean inService) throws SQLException{
         try{
