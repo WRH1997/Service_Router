@@ -434,9 +434,6 @@ public class PowerService{
                     float impact = populationEffected / entry.getValue().getRepairTime();
                     entry.getValue().setImpact(impact);
                     entry.getValue().setPopulationEffected(populationEffected);
-                    /*if(impact<=0){
-                        continue;
-                    }*/
                     hubImpacts.put(entry.getKey(), impact);
                 }
                 catch(SQLException e){
@@ -480,16 +477,16 @@ public class PowerService{
         }
         List<String> underservedPostals = new ArrayList<>();
         Map<String, Float> postalPopHubs = new HashMap<>();
-        float valueAtLimit = 0;
+        List<String> noServicePostals = new ArrayList<>();
         for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
             float population = (float) entry.getValue().getPopulation();
             try{
                 float postalHubs = db.getNumberOfPostalHubs(entry.getKey());
                 if(postalHubs==0){
+                    noServicePostals.add(entry.getKey());
                     continue;
                 }
                 float hubsPerCapita = population / postalHubs;
-                valueAtLimit = hubsPerCapita;
                 postalPopHubs.put(entry.getKey(), hubsPerCapita);
             }
             catch(SQLException e){
@@ -500,7 +497,12 @@ public class PowerService{
             return underservedPostals;
         }
         postalPopHubs = sortMapByValue(postalPopHubs);
+        float valueAtLimit = -1;
         int counter = 0;
+        for(int i=0; i<noServicePostals.size(); i++){
+            underservedPostals.add(noServicePostals.get(i));
+            counter++;
+        }
         for(Map.Entry<String, Float> entry: postalPopHubs.entrySet()){
             if(counter<limit-1){
                 underservedPostals.add(entry.getKey());
@@ -530,27 +532,32 @@ public class PowerService{
         }
         List<String> underservedPostals = new ArrayList<>();
         Map<String, Float> postalAreaHubs = new HashMap<>();
-        float valueAtLimit = 0;
+        List<String> noServicePostals = new ArrayList<>();
         for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
             float area = (float) entry.getValue().getArea();
             try{
                 float postalHubs = db.getNumberOfPostalHubs(entry.getKey());
                 if(postalHubs==0){
+                    noServicePostals.add(entry.getKey());
                     continue;
                 }
                 float hubsPerArea = area / postalHubs;
-                valueAtLimit = hubsPerArea;
                 postalAreaHubs.put(entry.getKey(), hubsPerArea);
             }
             catch(SQLException e){
                 throw new SQLException("SQL select from PostalHubRelations failed! \nSource: underservedPostalByArea\nDetails: " + e.getMessage());
             }
         }
-        if(postalAreaHubs.isEmpty()){
+        if(postalAreaHubs.isEmpty() && noServicePostals.isEmpty()){
             return underservedPostals;
         }
         postalAreaHubs = sortMapByValue(postalAreaHubs);
+        float valueAtLimit = -1;
         int counter = 0;
+        for(int i=0; i<noServicePostals.size(); i++){
+            underservedPostals.add(noServicePostals.get(i));
+            counter++;
+        }
         for(Map.Entry<String, Float> entry: postalAreaHubs.entrySet()){
             if(counter<limit-1){
                 underservedPostals.add(entry.getKey());
