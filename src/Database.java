@@ -14,7 +14,8 @@ public class Database {
     Database() throws Exception{
         credentials = new Properties();
         try{
-            InputStream input = new FileInputStream("src/credentials.prop");
+            //InputStream input = new FileInputStream("src/credentials.prop");
+            InputStream input = getClass().getResourceAsStream("credentials.prop");
             credentials.load(input);
             username = credentials.getProperty("username");
             password = credentials.getProperty("password");

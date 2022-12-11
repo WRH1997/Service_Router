@@ -4,6 +4,8 @@ import java.util.*;
 
 public class PowerService{
 
+    /*!!!*/
+    //no two hubs same location (assumption [methods implemented with this assumption] and design decision [outcome of this assumption in implementation])
     private Map<String, DamagedPostalCodes> postalCodes;
     private Map<String, HubImpact> distributionHubs;
     private Database db;
@@ -493,7 +495,7 @@ public class PowerService{
                 throw new SQLException("SQL select from PostalHubRelations failed! \nSource: underservedPostalByPopulation\nDetails: " + e.getMessage());
             }
         }
-        if(postalPopHubs.isEmpty()){
+        if(postalPopHubs.isEmpty() && noServicePostals.isEmpty()){
             return underservedPostals;
         }
         postalPopHubs = sortMapByValue(postalPopHubs);
@@ -597,8 +599,10 @@ public class PowerService{
         }
         List<Integer> rateOfRestoration = new ArrayList<>();
         float size = 0;
+        int listSize = 0;
         while(size<=1){
             rateOfRestoration.add(0);
+            listSize++;
             if(size==1){
                 break;
             }
@@ -619,7 +623,7 @@ public class PowerService{
         if(fixOrder.isEmpty()){
             return rateOfRestoration;
         }
-        int totalPopulation = getTotalPopulation();
+        int totalPopulation = getTotalServicedPopulation();
         float populationOutOfServiceFloat = 0;
         try{
             for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
@@ -635,7 +639,7 @@ public class PowerService{
             return rateOfRestoration;
         }
         rateOfRestoration.clear();
-        float percentageOfInServicePop = (((float) totalPopulation)- ((float) populationOutOfService)) / ((float) totalPopulation);
+        double percentageOfInServicePop = (((double) totalPopulation)- ((double) populationOutOfService)) / ((double) totalPopulation);
         double alreadyHavePowerIncrements = Math.floor(percentageOfInServicePop/increment);
         float currIncrement = 0;
         for(int i=0; i<=alreadyHavePowerIncrements; i++){
@@ -643,12 +647,14 @@ public class PowerService{
             currIncrement += increment;
         }
         float repairTimeElapsed = 0;
+        int lastRepairTimePerformed = 0;
         if(currIncrement>1){
             currIncrement = 1;
         }
         for(int i=0; i<fixOrder.size(); i++){
             repairTimeElapsed += fixOrder.get(i).getRepairTime();
-            percentageOfInServicePop += ((float) fixOrder.get(i).getPopulationEffected()) / ((float) totalPopulation);
+            lastRepairTimePerformed = (int) Math.ceil(repairTimeElapsed);
+            percentageOfInServicePop += ((double) fixOrder.get(i).getPopulationEffected()) / ((double) totalPopulation);
             while(percentageOfInServicePop>=currIncrement){
                 if(currIncrement==1){
                     rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
@@ -664,11 +670,14 @@ public class PowerService{
                 }
             }
         }
+        while(rateOfRestoration.size()<listSize){    //in case percentageOfInService is 0.9999999 (floating point inaccuracy) but should be 1
+            rateOfRestoration.add(lastRepairTimePerformed);
+        }
         return rateOfRestoration;
     }
 
 
-    private int getTotalPopulation(){
+    private int getTotalServicedPopulation(){
         int totalPopulation = 0;
         for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
             for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){
@@ -694,11 +703,176 @@ public class PowerService{
 
 
 
-    List<HubImpact> repairPlan(String startHub, int maxDistance, float maxTime){
-        return null;
+    List<HubImpact> repairPlan(String startHub, int maxDistance, float maxTime) throws Exception{
+        if(startHub==null){
+            throw new IllegalArgumentException("startHub is null! \nSource: repairPlan");
+        }
+        startHub = startHub.replaceAll("\\s+","");
+        if(startHub.equals("")){
+            throw new IllegalArgumentException("startHub is empty String! \nSource: repairPlan");
+        }
+        startHub = startHub.toUpperCase();
+        if(!distributionHubs.containsKey(startHub)){
+            throw new IllegalArgumentException("startHub does not exist (has not been added)!\nSource: repairPlan");
+        }
+        if(maxDistance<0){
+            throw new IllegalArgumentException("maxDistance is negative (invalid)!\nSource: repairPlan");
+        }
+        if(maxTime<0){
+            throw new IllegalArgumentException("maxTime is negative (invalid)!\nSource: repairPlan");
+        }
+        HubImpact firstHub = distributionHubs.get(startHub);
+        List<HubImpact> repairPlan = new ArrayList<>();
+        repairPlan.add(firstHub);
+        int firstHubX = firstHub.getLocation().getX();
+        int firstHubY = firstHub.getLocation().getY();
+        List<HubImpact> hubsInRange = new ArrayList<>();
+        HubImpact endHub = null;
+        float highestImpact = -1;
+        for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){
+            if(hub.getValue().getInService()){
+                continue;
+            }
+            if(hub.getValue().getHubId().equals(firstHub.getHubId())){
+                continue;
+            }
+            HubImpact potentialHub = hub.getValue();
+            int potentialHubX = potentialHub.getLocation().getX();
+            int potentialHubY = potentialHub.getLocation().getY();
+            double distanceFromStart = Math.sqrt(Math.pow((potentialHubX - firstHubX), 2) + Math.pow((potentialHubY - firstHubY), 2));
+            if(distanceFromStart<=(double)maxDistance){
+                hubsInRange.add(hub.getValue());
+                if(hub.getValue().getImpact()>highestImpact){
+                    endHub = hub.getValue();
+                    highestImpact = hub.getValue().getImpact();
+                }
+            }
+        }
+        if(hubsInRange.isEmpty()){
+            return repairPlan;
+        }
+        List<HubImpact> intermediateHubs = findIntermediateHubs(firstHub, endHub, hubsInRange, maxTime);
+        if(intermediateHubs.isEmpty()){
+            repairPlan.add(endHub);
+            return repairPlan;
+        }
+        if(firstHubX==endHub.getLocation().getX() || firstHubY==endHub.getLocation().getY()){
+            repairPlan = calculate1DRepairPlan(firstHub, endHub, intermediateHubs);
+            return repairPlan;
+        }
+        else{
+            RepairPlanGrid repairPlanGrid = new RepairPlanGrid(firstHub, endHub, intermediateHubs);
+            List<List<HubImpact>> pathCombinations = new ArrayList<>();
+            HubPathCombinations combinations = new HubPathCombinations();
+            List<List<HubImpact>> hubSubsets = combinations.calculateHubSubsets(intermediateHubs);
+            hubSubsets.remove(0);
+            for(int i=0; i<hubSubsets.size(); i++){
+                pathCombinations.addAll(combinations.getPathCombinations(hubSubsets.get(i)));
+            }
+            repairPlan.clear();
+            repairPlan.add(firstHub);
+            repairPlan.addAll(repairPlanGrid.findBestRepairPath(pathCombinations, endHub));
+            repairPlan.add(endHub);
+            return repairPlan;
+        }
     }
 
-    /*private void synchronizeDB() throws SQLException{
 
-    }*/
+    private List<HubImpact> findIntermediateHubs(HubImpact startHub, HubImpact endHub, List<HubImpact> hubsInRange, float maxTime){
+        List<HubImpact> intermediateHubs = new ArrayList<>();
+        int startX = startHub.getLocation().getX();
+        int startY = startHub.getLocation().getY();
+        int endX = endHub.getLocation().getX();
+        int endY = endHub.getLocation().getY();
+        for(int i=0; i<hubsInRange.size(); i++){
+            if(hubsInRange.get(i).getHubId().equals(endHub.getHubId())){
+                continue;
+            }
+            if(hubsInRange.get(i).getRepairTime()>maxTime){
+                continue;
+            }
+            int intermediateX = hubsInRange.get(i).getLocation().getX();
+            int intermediateY = hubsInRange.get(i).getLocation().getY();
+            if(startX>endX){
+                if(startY>endY){
+                    if(startX>=intermediateX && endX<=intermediateX){
+                        if(startY>=intermediateY && endY<=intermediateY){
+                            intermediateHubs.add(hubsInRange.get(i));
+                        }
+                    }
+                }
+                else{
+                    if(startX>=intermediateX && endX<=intermediateX){
+                        if(startY<=intermediateY && endY>=intermediateY){
+                            intermediateHubs.add(hubsInRange.get(i));
+                        }
+                    }
+                }
+            }
+            else{
+                if(startY>endY){
+                    if(startX>=intermediateX && endX<=intermediateX){
+                        if(startY>=intermediateY && endY<=intermediateY){
+                            intermediateHubs.add(hubsInRange.get(i));
+                        }
+                    }
+                }
+                else{
+                    if(startX<=intermediateX && endX>=intermediateX){
+                        if(startY<=intermediateY && endY>=intermediateY){
+                            intermediateHubs.add(hubsInRange.get(i));
+                        }
+                    }
+                }
+            }
+        }
+        return intermediateHubs;
+    }
+
+
+    private List<HubImpact> calculate1DRepairPlan(HubImpact startHub, HubImpact endHub, List<HubImpact> intermediateHubs){
+        boolean xIsEqual = false;
+        if(startHub.getLocation().getX()==endHub.getLocation().getX()){
+            xIsEqual = true;
+        }
+        List<Integer> intermediateCoordinates = new ArrayList<>();
+        for(int i=0; i<intermediateHubs.size(); i++){
+            if(xIsEqual){
+                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getY());
+            }
+            else{
+                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getX());
+            }
+        }
+        Collections.sort(intermediateCoordinates);
+        if(xIsEqual && (startHub.getLocation().getX()>endHub.getLocation().getX())){
+            Collections.reverse(intermediateCoordinates);
+        }
+        else if(!xIsEqual && (startHub.getLocation().getY()>endHub.getLocation().getY())){
+            Collections.reverse(intermediateCoordinates);
+        }
+        List<HubImpact> repairPlan = new ArrayList<>();
+        repairPlan.add(startHub);
+        for(int i=0; i<intermediateCoordinates.size(); i++){
+            for(int k=0; k<intermediateHubs.size(); k++){
+                if(!xIsEqual){
+                    if(intermediateHubs.get(k).getLocation().getX()==intermediateCoordinates.get(i)){
+                        repairPlan.add(intermediateHubs.get(k));
+                    }
+                }
+                else{
+                    if(intermediateHubs.get(k).getLocation().getY()==intermediateCoordinates.get(i)){
+                        repairPlan.add(intermediateHubs.get(k));
+                    }
+                }
+            }
+        }
+        repairPlan.add(endHub);
+        return repairPlan;
+    }
+
+
+
+    //no two hubs same location (assumption [methods implemented with this assumption] and design decision [outcome of this assumption in implementation])
+    //what if most impactful endHub is tie in impact and distance? (current implementation, just take first one --> document in design decisions)
 }
