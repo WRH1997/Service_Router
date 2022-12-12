@@ -4,13 +4,15 @@ import java.util.*;
 
 public class PowerService{
 
-    /*!!!*/
-    //no two hubs same location (assumption [methods implemented with this assumption] and design decision [outcome of this assumption in implementation])
-    private Map<String, DamagedPostalCodes> postalCodes;
-    private Map<String, HubImpact> distributionHubs;
-    private Database db;
+    private Map<String, DamagedPostalCodes> postalCodes;   //map to store all postal codes as String-DamagedPostalCodes pairs where the String key is the postal code identifier
+    private Map<String, HubImpact> distributionHubs;   //map to store all distribution hubs as String-HubImpact pairs where the string key is the hub's identifier
+    private Database db;   //a Database interface class object that is used to access the SQL database
 
+
+    //the PowerService constructor accesses the database and populates the postalCodes and distributionHubs map with the
+    //existing postal codes and distribution hubs that are stored in the database
     PowerService() throws Exception{
+        //first, check if we can access the SQL database
         try {
             db = new Database();
         }
@@ -22,6 +24,7 @@ public class PowerService{
         }
         postalCodes = new HashMap<>();
         distributionHubs = new HashMap<>();
+        //load in the existing postal codes stored in the database into the postalCodes map
         List<DamagedPostalCodes> existingPostalCodes = new ArrayList<>();
         try{
             existingPostalCodes = db.getPostalCodesFromDB();
@@ -34,6 +37,7 @@ public class PowerService{
                 postalCodes.put(existingPostalCodes.get(i).getPostalCodeId(), existingPostalCodes.get(i));
             }
         }
+        //load in the existing distribution hubs stored in the database into the distributionHubs map
         List<HubImpact> existingDistributionHubs = new ArrayList<>();
         try{
             existingDistributionHubs = db.getDistributionHubsFromDB();
@@ -49,20 +53,24 @@ public class PowerService{
     }
 
 
+
+
     boolean addPostalCode(String postalCode, int population, int area) /*throws SQLException*/{
         if(postalCode==null){
             return false;
         }
-        //https://stackoverflow.com/questions/5455794/removing-whitespace-from-strings-in-java
-        postalCode = postalCode.replaceAll("\\s+","");
+        //CITATION NOTE: I referenced the following URL for the regex syntax to remove all empty spaces in a string
+        //URL:https://stackoverflow.com/questions/5455794/removing-whitespace-from-strings-in-java
+        //Accessed: December 7, 2022.
+        postalCode = postalCode.replaceAll("\\s+","");    //standardize postal codes by eliminating all empty spaces
         if(postalCode.equals("")){
             return false;
         }
-        postalCode = postalCode.toUpperCase();
-        if(!postalCodeIsValidPattern(postalCode)){
+        postalCode = postalCode.toUpperCase();     //standardize postal codes by converting them to uppercase
+        if(!postalCodeIsValidPattern(postalCode)){    //check if the postalCode conforms to the postal code format (i.e., letter-number-letter-number....)
             return false;
         }
-        if(postalCodes.containsKey(postalCode)){
+        if(postalCodes.containsKey(postalCode)){   //check if the postalCode already exists (duplicate postals are invalid)
             return false;
         }
         if(population<0){
@@ -71,31 +79,33 @@ public class PowerService{
         if(area<1){
             return false;
         }
+        //create a new DamagedPostalCodes object to store this postal code and pass it to the database object to insert it into the PostalCodes table
         DamagedPostalCodes newPostalCode = new DamagedPostalCodes(postalCode, population, area, 0);
         try{
             db.addPostalCodeToDB(newPostalCode);
         }
         catch(SQLException e){
-            //which of these should be used? (consistent exceptions or boolean since method returns boolean)
-            //throw new SQLException("SQL insert into PostalCodes table failed!\nSource: addPostalCode\nDetails: " + e.getMessage());
             return false;
         }
         try{
-            updatePostalHubRelation(postalCode);
-            newPostalCode.setRepairEstimate(db.calculatePostalRepairTime(postalCode));
+            updatePostalHubRelation(postalCode);    //update the PostalHubRelation bridge table to reflect any hubs that service this postal code (a hub that serviced this postal may have been added before this postal, so we need to check and update any relations in the PostalHubRelation table accordingly)
+            newPostalCode.setRepairEstimate(db.calculatePostalRepairTime(postalCode));    //calculate the total repair time needed (if any) to restore power to all this postal's population, and set the DamagedPostalCodes object's repairTime attribute to that calculated value
         }
         catch(SQLException e){
-            //which of these should be used? (consistent exceptions or boolean since method returns boolean)
-            //throw new SQLException("SQL insert into PostalHubRelation table failed!\nSource: addPostalCode\nDetails: " + e.getMessage());
             return false;
         }
-        postalCodes.put(newPostalCode.getPostalCodeId(), newPostalCode);
+        postalCodes.put(newPostalCode.getPostalCodeId(), newPostalCode);   //add this new postal code to the postalCodes map
         return true;
     }
 
 
+
+
+    //this method is used during addPostalCode to check whether a postal code identifier conforms to
+    //the postal code format (i.e., letter-number-letter-number...)
     private boolean postalCodeIsValidPattern(String postalCode){
         int counter = 0;
+        //iterate through the postal code string and check that each even index is a letter, and each odd index is a number (0 is even)
         for(int i=0; i<postalCode.length(); i++){
             if(counter%2==0){
                 if(!Character.isLetter(postalCode.charAt(i))){
@@ -113,11 +123,15 @@ public class PowerService{
     }
 
 
+
+
+    //method used during addPostalCode and addDistributionHub to update the PostalHubRelation bridge table
+    //to connect postal codes to the hubs that service them (many-to-many relationship)
     private void updatePostalHubRelation(String postalCode) throws SQLException{
-        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){
-            if(entry.getValue().getServicedAreas().contains(postalCode)){
+        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){    //iterate through each hub stored in the distributionHubs map
+            if(entry.getValue().getServicedAreas().contains(postalCode)){    //iterate through each postal code in that hub's servicedArea set
                 try{
-                    db.updatePostalHubRelation(postalCode, entry.getKey());
+                    db.updatePostalHubRelation(postalCode, entry.getKey());   //connect this hub to this postal code (if it is not already connected) by inserting the corresponding row into the PostalHubRelation table
                 }
                 catch(SQLException e){
                     throw e;
@@ -127,22 +141,27 @@ public class PowerService{
     }
 
 
+
+
     boolean addDistributionHub(String hubIdentifier, Point location, Set<String> servicedAreas) /*throws SQLException*/{
         if(hubIdentifier==null){
             return false;
         }
-        hubIdentifier = hubIdentifier.replaceAll("\\s+","");
+        //CITATION NOTE: I referenced the following URL for the regex syntax to remove all empty spaces in a string
+        //URL:https://stackoverflow.com/questions/5455794/removing-whitespace-from-strings-in-java
+        //Accessed: December 7, 2022.
+        hubIdentifier = hubIdentifier.replaceAll("\\s+","");    //standardize hub ids by removing all empty spaces
         if(hubIdentifier.equals("")){
             return false;
         }
-        hubIdentifier = hubIdentifier.toUpperCase();
-        if(distributionHubs.containsKey(hubIdentifier)){
+        hubIdentifier = hubIdentifier.toUpperCase();    //standardize hub ids by converting them to uppercase
+        if(distributionHubs.containsKey(hubIdentifier)){    //check if hub already exists (duplicates are invalid)
             return false;
         }
         if(location==null){
             return false;
         }
-        if(hubExistsInLocation(location)){
+        if(hubExistsInLocation(location)){    //check if a hub already exists at the coordinates supplied in the location argument (no two hubs can have the same location)
             return false;
         }
         if(servicedAreas==null){
@@ -155,25 +174,26 @@ public class PowerService{
             if(area==null){
                 return false;
             }
-            area = area.replaceAll("\\s+","");
+            area = area.replaceAll("\\s+","");    //standardize postal codes by eliminating all empty spaces
             if(area.equals("")){
                 return false;
             }
-            area = area.toUpperCase();
+            area = area.toUpperCase();    //standardize postal codes by converting them to uppercase
             if(!postalCodeIsValidPattern(area)){
                 return false;
             }
             servicedPostalCodes.add(area);
         }
+        //create a HubImpact object to store this hub's information, and pass it to the database interface object to insert the hub's data into the DistributionHubs table
         HubImpact newHub = new HubImpact(hubIdentifier, location, servicedPostalCodes, 0, true, 0, 0);
         try{
             db.addDistributionHubToDB(newHub);
         }
         catch(SQLException e){
-            //which of these should be used? (consistent exceptions or boolean since method returns boolean)
-            //throw new SQLException("SQL insert into DistributionHubs table failed!\nSource: addDistributionHub\nDetails: " + e.getMessage());
             return false;
         }
+        //for each of the postal codes this hub services, add a row to reflect that relationship in the PostalHubRelation table
+        //note that a row is not added if the postal code does not exist, but will be added if/when that postal code is added later on
         try{
             Iterator itr2 = servicedPostalCodes.iterator();
             while(itr2.hasNext()){
@@ -182,18 +202,19 @@ public class PowerService{
             }
         }
         catch(SQLException e){
-            //which of these should be used? (consistent exceptions or boolean since method returns boolean)
-            //throw new SQLException("SQL inset into PostalHubRelation table failed!\nSource: addDistributionHub\nDetails: " + e.getMessage());
             return false;
         }
-        distributionHubs.put(hubIdentifier, newHub);
+        distributionHubs.put(hubIdentifier, newHub);   //add the new hub to the distributionHubs map
         return true;
     }
 
 
-    boolean hubExistsInLocation(Point location){
-        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){
-            if(entry.getValue().getLocation().compare(location)){
+
+    //this method is used during addDistributionHub. It checks whether a hub already exists in the location
+    //of the new hub that trying to be added.
+    private boolean hubExistsInLocation(Point location){   //The location parameter is the location of the new hub
+        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){   //iterate through the existing hubs
+            if(entry.getValue().getLocation().compare(location)){      //check if the new hub's location has the same coordinates as this existing hub's location
                 return true;
             }
         }
@@ -201,49 +222,44 @@ public class PowerService{
     }
 
 
+
+
     void hubDamage(String hubIdentifier, float repairEstimate) throws Exception{
         if(hubIdentifier==null){
             throw new IllegalArgumentException("HubIdentifier is null! \nSource: hubDamage");
         }
-        hubIdentifier = hubIdentifier.replaceAll("\\s+","");
+        //CITATION NOTE: I referenced the following URL for the regex syntax to remove all empty spaces in a string
+        //URL:https://stackoverflow.com/questions/5455794/removing-whitespace-from-strings-in-java
+        //Accessed: December 7, 2022.
+        hubIdentifier = hubIdentifier.replaceAll("\\s+","");   //convert hub id into the standard format (no spaces, all uppercase)
         if(hubIdentifier.equals("")){
             throw new IllegalArgumentException("HubIdentifier is empty! \nSource: hubDamage");
         }
-        hubIdentifier = hubIdentifier.toUpperCase();
-        if(!distributionHubs.containsKey(hubIdentifier)){
+        hubIdentifier = hubIdentifier.toUpperCase();   //convert hub id into the standard format (no spaces, all uppercase)
+        if(!distributionHubs.containsKey(hubIdentifier)){    //check that the hub being reported exists
             throw new IllegalArgumentException("HubIdentifier does not exist (has not been added)! \nSource: hubDamage");
         }
         if(repairEstimate<=0){
             throw new IllegalArgumentException("RepairEstimate is zero or negative (invalid)! \nSource: hubDamage");
         }
         HubImpact hub = distributionHubs.get(hubIdentifier);
-        hub.setRepairTime(hub.getRepairTime() + repairEstimate);
-        hub.setInService(false);
+        hub.setRepairTime(hub.getRepairTime() + repairEstimate);   //increment the hub's repairTime attribute according to the repairTime being reported
+        hub.setInService(false);   //set its inService to false to indicate it is offline.
         try{
-            db.updateHubDamage(hubIdentifier, repairEstimate);
+            db.updateHubDamage(hubIdentifier, repairEstimate);   //update the DistributionHubs table to reflect this hub's damage
         }
         catch(SQLException e){
             throw new SQLException("SQL update to DistributionHubs table failed!\nSource: hubDamage\nDetails: " + e.getMessage());
         }
-        /*try{
-            Set<String> servicedAreas = distributionHubs.get(hubIdentifier).getServicedAreas();
-            distributionHubs.get(hubIdentifier).setPopulationEffected(db.calculatePopulationEffected(hubIdentifier, servicedAreas));
-            Iterator itr = servicedAreas.iterator();
-            while(itr.hasNext()){
-                String postalCode = (String) itr.next();
-                postalCodes.get(postalCode).setRepairEstimate(db.calculatePostalRepairTime(postalCode));
-            }
-        }
-        catch(SQLException e){
-            throw new SQLException("SQL select from DistributionHubs, PostalCodes, PostalHubRelation tables failed!\nSource: hubDamage\nDetails: " + e.getMessage());
-        }*/
         try{
-            hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
-            hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
+            hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));   //calculate and set the total population that are effected by this hub's outage
+            hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());   //calculate and set the hub's impact (significance) as the total amount of people affected by the hub's outage divided by its estimated repair time
+            //now, we need to update each of this hub's serviced areas to reflect the new repairTime needed for all a postal
+            //code's population to regain power
             Iterator itr = hub.getServicedAreas().iterator();
             while(itr.hasNext()){
                 String postalCode = (String) itr.next();
-                postalCodes.get(postalCode).setRepairEstimate(db.calculatePostalRepairTime(postalCode));
+                postalCodes.get(postalCode).setRepairEstimate(db.calculatePostalRepairTime(postalCode));   //recalculate and set postal code's total repair time (i.e., based on this hub and other hubs servicing it)
             }
         }
         catch(SQLException e){
@@ -253,25 +269,29 @@ public class PowerService{
 
 
 
+
     void hubRepair(String hubIdentifier, String employeeId, float repairTime, boolean inService) throws Exception{
         if(hubIdentifier==null){
             throw new IllegalArgumentException("HubIdentifier is null! \nSource: hubRepair");
         }
-        hubIdentifier = hubIdentifier.replaceAll("\\s+","");
+        //CITATION NOTE: I referenced the following URL for the regex syntax to remove all empty spaces in a string
+        //URL:https://stackoverflow.com/questions/5455794/removing-whitespace-from-strings-in-java
+        //Accessed: December 7, 2022.
+        hubIdentifier = hubIdentifier.replaceAll("\\s+","");    //convert hub id into the standard format (no spaces, all uppercase)
         if(hubIdentifier.equals("")){
             throw new IllegalArgumentException("HubIdentifier is empty! \nSource: hubRepair");
         }
-        hubIdentifier = hubIdentifier.toUpperCase();
-        if(!distributionHubs.containsKey(hubIdentifier)){
+        hubIdentifier = hubIdentifier.toUpperCase();    //convert hub id into the standard format (no spaces, all uppercase)
+        if(!distributionHubs.containsKey(hubIdentifier)){   //check if hub being repaired exists
             throw new IllegalArgumentException("HubIdentifier does not exist (has not been added)! \nSource: hubRepair");
         }
-        if(distributionHubs.get(hubIdentifier).getInService()){
+        if(distributionHubs.get(hubIdentifier).getInService()){    //check if the hub being repaired is already online (in service)
             throw new IllegalArgumentException("This hub is already in service (invalid)! \nSource: hubRepair");
         }
         if(employeeId==null){
             throw new IllegalArgumentException("EmployeeId is null! \nSource: hubRepair");
         }
-        employeeId = employeeId.replaceAll("\\s+", "");
+        employeeId = employeeId.replaceAll("\\s+", "");    //standardize employee ids by eliminating empty spaces
         if(employeeId.equals("")){
             throw new IllegalArgumentException("EmployeeId is empty! \nSource: hubRepair");
         }
@@ -279,26 +299,29 @@ public class PowerService{
             throw new IllegalArgumentException("RepairTime is negative! \nSource: hubRepair");
         }
         try{
+            //insert row into RepairLog table to store this repair being performed
             db.updateRepairLog(employeeId, hubIdentifier, repairTime, inService);
         }
         catch(SQLException e){
             throw new SQLException("SQL insert on RepairLog table failed!\nSource: hubRepair \nDetails: " + e.getMessage());
         }
-        if(inService){
+        if(inService){   //the repair results in the hub being online
+            //set the hub estimated repair time, impact, population effected, and in service values to reflect that it is now online (regardless of repair time done)
             HubImpact hub = distributionHubs.get(hubIdentifier);
             hub.setRepairTime(0);
             hub.setInService(true);
             hub.setImpact(0);
             hub.setPopulationEffected(0);
             try{
+                //update DistributionHubs table to reflect that this hub is now back online
                 db.applyHubRepairToDB(hubIdentifier, 0, true);
             }
             catch(SQLException e){
                 throw new SQLException("SQL Update on DistributionHubs table failed!\nSource: hubRepair \nDetails: " + e.getMessage());
             }
             try{
-                //hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
-                //hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
+                //update each of the postal codes serviced by the hub that was repaired to reflect the change in the total
+                //repair time each postal code needs to restore power to all its population
                 Iterator itr = hub.getServicedAreas().iterator();
                 while(itr.hasNext()){
                     String postalCode = (String) itr.next();
@@ -309,21 +332,27 @@ public class PowerService{
                 throw new SQLException("SQL select from DistributionHubs, PostalCodes, PostalHubRelation tables failed!\nSource: hubRepair\nDetails: " + e.getMessage());
             }
         }
-        else{
+        else{   //the repair does not result in hub being online (still offline)
             HubImpact hub = distributionHubs.get(hubIdentifier);
-            //DOCUMENT THIS: if repairTime >= repairEstimate, dont change repair estimate? (what other way can we work around this???)
+            //the hub's repair estimate is only changed if this repair's time is less than the original estimate.
+            //In the case that the repair time is greater than or equal to the original estimate, then the hub's estimate is not changed
+            //(see design decision in external documentation for more details)
             if(repairTime<hub.getRepairTime()){
                 hub.setRepairTime(hub.getRepairTime() - repairTime);
             }
             try{
+                //update the DistributionHubs table to reflect this repair
                 db.applyHubRepairToDB(hubIdentifier, hub.getRepairTime(), false);
             }
             catch(SQLException e){
                 throw new SQLException("SQL Update on DistributionHubs table failed!\nSource: hubRepair \nDetails: " + e.getMessage());
             }
             try{
+                //recalculate and set this hub's impact (population effected by its outage and [that population/new repair time estimate]}
                 hub.setPopulationEffected(db.calculatePopulationEffected(hub.getHubId(), hub.getServicedAreas()));
                 hub.setImpact(((float) hub.getPopulationEffected()) / hub.getRepairTime());
+                //update each of the postal codes serviced by the hub that was repaired to reflect the change in the total
+                //repair time each postal code needs to restore power to all its population
                 Iterator itr = hub.getServicedAreas().iterator();
                 while(itr.hasNext()){
                     String postalCode = (String) itr.next();
@@ -337,65 +366,73 @@ public class PowerService{
     }
 
 
+
+
     int peopleOutOfService() throws SQLException{
-        float totalPeopleOutOfService = 0;
+        float totalPeopleOutOfService = 0;   //tally variable
         try{
-            for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
-                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());
-                totalPeopleOutOfService += entry.getValue().getPopulation() * postalCodePopOutOfService;
+            for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){   //iterate through the postalCodes map
+                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());  //calculate this postal code's population without service
+                totalPeopleOutOfService += entry.getValue().getPopulation() * postalCodePopOutOfService;    //increment the tally by that population
             }
+            //note that these calculations only take into account those postal codes that are serviced by at least one hub
         }
         catch(SQLException e){
             throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
         }
         try{
+            //calculate the total population of postal codes that are not serviced by any hubs
+            //(i.e., out of service since they have no hubs) and add that to the tally
             totalPeopleOutOfService += db.postalPopulationWithoutHubOutOfService();
         }
         catch(SQLException e){
             throw new SQLException("SQL join/select from PostalCodes and PostalHubRelation failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
         }
-        int peopleOutOfService = (int) Math.ceil(totalPeopleOutOfService);
+        int peopleOutOfService = (int) Math.ceil(totalPeopleOutOfService);   //round up the tally (i.e., 10.5 becomes 11)
         return peopleOutOfService;
     }
+
 
 
     List<DamagedPostalCodes> mostDamagedPostalCodes(int limit) throws Exception{
         if(limit<1){
             throw new IllegalArgumentException("Limit is less than 1 (invalid)! \nSource: mostDamagedPostalCodes");
         }
-        Map<String, Float> postalRepairTimes = new HashMap<>();
-        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
+        Map<String, Float> postalRepairTimes = new HashMap<>();     //map to store each postal code and its corresponding total amount of repair time to regain full power
+        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){   //iterate through the postalCodes map
             float repairEstimate = entry.getValue().getRepairEstimate();
             try{
-                repairEstimate = db.calculatePostalRepairTime(entry.getKey());
+                repairEstimate = db.calculatePostalRepairTime(entry.getKey());  //calculate this postal code's total repair time needed to regain full power
                 entry.getValue().setRepairEstimate(repairEstimate);
             }
             catch(SQLException e){
                 throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: mostDamagedPostalCodes\nDetails: " + e.getMessage());
             }
+            //add only the postal codes that are affected by at least one hub outage to the postalRepairTImes map
+            //(this also means that postal codes that are not serviced by any hubs are excluded [see design decisions in external documentation for more details])
             if(repairEstimate>0){
                 postalRepairTimes.put(entry.getKey(), repairEstimate);
             }
         }
-        if(postalRepairTimes.isEmpty()){
+        if(postalRepairTimes.isEmpty()){    //there are no postal codes that are effected by hub outages, so just return an empty list
             return new ArrayList<>();
         }
-        Map<String, Float> sortedPostalRepairTimes = sortMapByValue(postalRepairTimes);
+        Map<String, Float> sortedPostalRepairTimes = sortMapByValue(postalRepairTimes);   //sort the postalRepairTimes map by its values in descending order
         List<DamagedPostalCodes> mostDamagedPostalCodes = new ArrayList<>();
         int counter = 0;
         float valueAtLimit = -1;
-        for(Map.Entry<String, Float> entry: sortedPostalRepairTimes.entrySet()){
-            if(counter<limit-1){
+        for(Map.Entry<String, Float> entry: sortedPostalRepairTimes.entrySet()){    //iterate through this sorted list and add postal codes the list of most DamagedPostalCodes
+            if(counter<limit-1){    //this postal code is before the limit so just add it
                 mostDamagedPostalCodes.add(postalCodes.get(entry.getKey()));
                 counter++;
             }
-            else if(counter==limit-1){
+            else if(counter==limit-1){    //this postal code is at the limit, so we add it to the list and same its value (its repairTime)
                 mostDamagedPostalCodes.add(postalCodes.get(entry.getKey()));
                 counter++;
                 valueAtLimit = entry.getValue();
             }
-            else{
-                if(entry.getValue()==valueAtLimit){
+            else{   //postal codes in sorted map are passed the limit
+                if(entry.getValue()==valueAtLimit){     //keep adding postal codes beyond the limit that tie with the postal code at the limit
                     mostDamagedPostalCodes.add(postalCodes.get(entry.getKey()));
                 }
                 else{
@@ -407,12 +444,17 @@ public class PowerService{
     }
 
 
+
+    //this sorts a map by its values in descending order and is used during
+    //mostDamagedPostalCodes, fixOrder, underservedPostalByPopulation, and underservedPostalByArea
     private Map<String, Float> sortMapByValue(Map<String, Float> unsortedMap){
-        Map<String, Float> sortedMap = new LinkedHashMap<>();   //linkedHashMap to retain insertion order
+        Map<String, Float> sortedMap = new LinkedHashMap<>();   //map to store entries that are sorted by their values (linkedHashMap to retain insertion order)
+        //add all the unsorted map's values to a list and then sort that list in descending order
         List<Float> sortedValues = new ArrayList<>();
         sortedValues.addAll(unsortedMap.values());
         Collections.sort(sortedValues);
         Collections.reverse(sortedValues);
+        //match entries of the unsorted map with the sorted list's values, and those pairings to the sorted map
         for(int i=0; i<sortedValues.size(); i++){
             for(Map.Entry<String, Float> entry: unsortedMap.entrySet()){
                 if(entry.getValue() == sortedValues.get(i) && !sortedMap.containsKey(entry.getKey())){
@@ -424,14 +466,17 @@ public class PowerService{
     }
 
 
+
+
     List<HubImpact> fixOrder(int limit) throws Exception{
         if(limit<1){
             throw new IllegalArgumentException("Limit is less than 1 (invalid)! \nSource: fixOrder");
         }
-        Map<String, Float> hubImpacts = new HashMap<>();
-        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){
-            if(!entry.getValue().getInService()){
+        Map<String, Float> hubImpacts = new HashMap<>();    //map to store each hub and its impact (population effected/repair time)
+        for(Map.Entry<String, HubImpact> entry: distributionHubs.entrySet()){   //iterate through the distributionHubs map
+            if(!entry.getValue().getInService()){    //take into account only the hubs that are experiencing an outage (not in service)
                 try{
+                    //calculate that hub's impact, then add the hub's identifier and impact to the hubImpact map
                     float populationEffected = db.calculatePopulationEffected(entry.getKey(), entry.getValue().getServicedAreas());
                     float impact = populationEffected / entry.getValue().getRepairTime();
                     entry.getValue().setImpact(impact);
@@ -443,25 +488,26 @@ public class PowerService{
                 }
             }
         }
-        if(hubImpacts.isEmpty()){
+        if(hubImpacts.isEmpty()){   //no hubs are downed, so just return an empty list
             return new ArrayList<>();
         }
         List<HubImpact> fixOrder = new ArrayList<>();
-        Map<String, Float> sortedHubImpacts = sortMapByValue(hubImpacts);
+        Map<String, Float> sortedHubImpacts = sortMapByValue(hubImpacts);  //sort the hubImpacts map by its values (impacts) in descending order
         int counter = 0;
-        float valueAtLimit = -1;
+        float valueAtLimit = -1;  //variable to store impact of hub at limit
+        //iterate through the sorted map and add entries to the fixOrder list
         for(Map.Entry<String, Float> entry: sortedHubImpacts.entrySet()){
-            if(counter<limit-1){
+            if(counter<limit-1){   //hub is before list limit so just add it
                 fixOrder.add(distributionHubs.get(entry.getKey()));
                 counter++;
             }
-            else if(counter==limit-1){
+            else if(counter==limit-1){   //hub is at the list limit so add it and store its impact value
                 fixOrder.add(distributionHubs.get(entry.getKey()));
                 counter++;
                 valueAtLimit = entry.getValue();
             }
-            else{
-                if(entry.getValue()==valueAtLimit){
+            else{   //hub is passed the list limit
+                if(entry.getValue()==valueAtLimit){   //add hubs passed the limit that tie in impact with the hub at the limit to the list
                     fixOrder.add(distributionHubs.get(entry.getKey()));
                 }
                 else{
@@ -473,50 +519,56 @@ public class PowerService{
     }
 
 
+
+
     List<String> underservedPostalByPopulation(int limit) throws Exception{
         if(limit<1){
             throw new IllegalArgumentException("Limit is less than 1 (invalid)! \nSource: underservedPostalByPopulation");
         }
         List<String> underservedPostals = new ArrayList<>();
-        Map<String, Float> postalPopHubs = new HashMap<>();
-        List<String> noServicePostals = new ArrayList<>();
-        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
+        Map<String, Float> postalPopHubs = new HashMap<>();    //map to store each postal code and its population per hub (population/number of servicing hubs)
+        List<String> noServicePostals = new ArrayList<>();    //list to store postal codes that are not serviced by any hubs
+        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){    //iterate through the postalCodes map
             float population = (float) entry.getValue().getPopulation();
             try{
-                float postalHubs = db.getNumberOfPostalHubs(entry.getKey());
-                if(postalHubs==0){
+                float postalHubs = db.getNumberOfPostalHubs(entry.getKey());    //get the total number of hubs that service this postal code
+                if(postalHubs==0){   //postal code is not serviced by any hubs, so add it to the dedicated list and move on to the next postal code
                     noServicePostals.add(entry.getKey());
                     continue;
                 }
-                float hubsPerCapita = population / postalHubs;
-                postalPopHubs.put(entry.getKey(), hubsPerCapita);
+                //calculate this postal code's capitaPerHub and add its identifier and that calculated value to the postalPopHubs map
+                float capitaPerHub = population / postalHubs;
+                postalPopHubs.put(entry.getKey(), capitaPerHub);
             }
             catch(SQLException e){
                 throw new SQLException("SQL select from PostalHubRelations failed! \nSource: underservedPostalByPopulation\nDetails: " + e.getMessage());
             }
         }
-        if(postalPopHubs.isEmpty() && noServicePostals.isEmpty()){
+        if(postalPopHubs.isEmpty() && noServicePostals.isEmpty()){    //no postal codes exists, so just return an empty list
             return underservedPostals;
         }
-        postalPopHubs = sortMapByValue(postalPopHubs);
-        float valueAtLimit = -1;
+        postalPopHubs = sortMapByValue(postalPopHubs);  //sort the postalPopHubs map by its values in descending order
+        float valueAtLimit = -1;  //variable to store capitaPerHub of postal code at limit
         int counter = 0;
+        //add all the postal codes that are not serviced by any hubs to the beginning of underservedPostals list
+        //(this is because these postal codes are the most underserved by default regardless of their populations
+        //and are all tied with a capitaPerHub of 0 meaning they will all be added to the list regardless of the limit argument)
         for(int i=0; i<noServicePostals.size(); i++){
             underservedPostals.add(noServicePostals.get(i));
             counter++;
         }
-        for(Map.Entry<String, Float> entry: postalPopHubs.entrySet()){
-            if(counter<limit-1){
+        for(Map.Entry<String, Float> entry: postalPopHubs.entrySet()){   //iterate through the sorted postalPopHubs map
+            if(counter<limit-1){   //postal code is before list limit, so just add it
                 underservedPostals.add(entry.getKey());
                 counter++;
             }
-            else if(counter==limit-1){
+            else if(counter==limit-1){   //postal code is at list limit, so add it and store its capitaPerHub value
                 underservedPostals.add(entry.getKey());
                 counter++;
                 valueAtLimit = entry.getValue();
             }
-            else{
-                if(entry.getValue()==valueAtLimit){
+            else{   //postal code is passed list limit
+                if(entry.getValue()==valueAtLimit){   //add postal codes that tie in capitaPerHub with the postal code at the limit
                     underservedPostals.add(entry.getKey());
                 }
                 else{
@@ -526,6 +578,7 @@ public class PowerService{
         }
         return underservedPostals;
     }
+
 
 
     List<String> underservedPostalByArea(int limit) throws Exception{
@@ -533,45 +586,49 @@ public class PowerService{
             throw new IllegalArgumentException("Limit is less than 1 (invalid)! \nSource: underservedPostalByArea");
         }
         List<String> underservedPostals = new ArrayList<>();
-        Map<String, Float> postalAreaHubs = new HashMap<>();
-        List<String> noServicePostals = new ArrayList<>();
-        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
+        Map<String, Float> postalAreaHubs = new HashMap<>();   //map to store each postal code and its area per hub (area/number of servicing hubs)
+        List<String> noServicePostals = new ArrayList<>();   //list to store postal codes that are not serviced by any hubs
+        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){   //iterate through the postalCodes map
             float area = (float) entry.getValue().getArea();
             try{
-                float postalHubs = db.getNumberOfPostalHubs(entry.getKey());
-                if(postalHubs==0){
+                float postalHubs = db.getNumberOfPostalHubs(entry.getKey());   //get the total number of hubs that service this postal code
+                if(postalHubs==0){   //postal code is not serviced by any hubs, so add it to the dedicated list and move on to the next postal code
                     noServicePostals.add(entry.getKey());
                     continue;
                 }
-                float hubsPerArea = area / postalHubs;
-                postalAreaHubs.put(entry.getKey(), hubsPerArea);
+                //calculate this postal code's areaPerHub and add its identifier and that calculated value to the postalAreaHubs map
+                float areaPerHub = area / postalHubs;
+                postalAreaHubs.put(entry.getKey(), areaPerHub);
             }
             catch(SQLException e){
                 throw new SQLException("SQL select from PostalHubRelations failed! \nSource: underservedPostalByArea\nDetails: " + e.getMessage());
             }
         }
-        if(postalAreaHubs.isEmpty() && noServicePostals.isEmpty()){
+        if(postalAreaHubs.isEmpty() && noServicePostals.isEmpty()){   //no postal codes exists, so just return an empty list
             return underservedPostals;
         }
-        postalAreaHubs = sortMapByValue(postalAreaHubs);
-        float valueAtLimit = -1;
+        postalAreaHubs = sortMapByValue(postalAreaHubs);    //sort the postalAreaHubs map by its values in descending order
+        float valueAtLimit = -1;    //variable to store areaPerHub of postal code at limit
         int counter = 0;
+        //add all the postal codes that are not serviced by any hubs to the beginning of underservedPostals list
+        //(this is because these postal codes are the most underserved by default regardless of their areas
+        //and are all tied with a areaPerHub of 0 meaning they will all be added to the list regardless of the limit argument)
         for(int i=0; i<noServicePostals.size(); i++){
             underservedPostals.add(noServicePostals.get(i));
             counter++;
         }
-        for(Map.Entry<String, Float> entry: postalAreaHubs.entrySet()){
-            if(counter<limit-1){
+        for(Map.Entry<String, Float> entry: postalAreaHubs.entrySet()){   //iterate through the sorted postalAreaHubs map
+            if(counter<limit-1){   //postal code is before list limit, so just add it
                 underservedPostals.add(entry.getKey());
                 counter++;
             }
-            else if(counter==limit-1){
+            else if(counter==limit-1){    //postal code is at list limit, so add it and store its areaPerHub value
                 underservedPostals.add(entry.getKey());
                 counter++;
                 valueAtLimit = entry.getValue();
             }
-            else{
-                if(entry.getValue()==valueAtLimit){
+            else{   //postal code is passed list limit
+                if(entry.getValue()==valueAtLimit){   //add postal codes that tie in areaPerHub with the postal code at the limit
                     underservedPostals.add(entry.getKey());
                 }
                 else{
@@ -581,6 +638,7 @@ public class PowerService{
         }
         return underservedPostals;
     }
+
 
 
 
@@ -595,23 +653,24 @@ public class PowerService{
             throw new IllegalArgumentException("Increment is too small (less than 0.001) [Invalid: granularity issue]!\nSource: rateOfServiceRestoration");
         }
         if(distributionHubs.isEmpty()){
-            throw new IllegalArgumentException("No distribution hubs exists (invalid) [will create infinite list of zeroes]!\nSource: rateOfServiceRestoration");
+            throw new IllegalArgumentException("No distribution hubs exists (invalid)!\nSource: rateOfServiceRestoration");
         }
         List<Integer> rateOfRestoration = new ArrayList<>();
-        float size = 0;
-        int listSize = 0;
-        while(size<=1){
-            rateOfRestoration.add(0);
+        float listIncrement = 0;   //variable to store the current increment value
+        int listSize = 0;   //variable to store rateOfRestoration's correct size based on the value of the increment argument
+        while(listIncrement<=1){
+            rateOfRestoration.add(0);  //add 0 to represent 0 hours to the list
             listSize++;
-            if(size==1){
+            if(listIncrement==1){   //current increment has reach 100%, so stop adding 0s to the list
                 break;
             }
-            size += increment;
-            if(size>1){
-                size = 1;
+            listIncrement += increment;   //add "increment" value to the current increment variable
+            if(listIncrement>1){   //current increment goes passed 100%, so set it back to 100% (this happens in cases where increment is 0.6 for example)
+                listIncrement = 1;
             }
         }
-        List<HubImpact> fixOrder = fixOrder(distributionHubs.size());
+        List<HubImpact> fixOrder = fixOrder(distributionHubs.size());   //get a list of hubs to fix sorted by their impacts in descending order
+        //remove all hubs with an impact of 0 since they will have no effect on the percentage of population that are out of service
         for(int i=fixOrder.size()-1; i>=0; i--){
             if(fixOrder.get(i).getImpact()==0){
                 fixOrder.remove(i);
@@ -620,12 +679,12 @@ public class PowerService{
                 break;
             }
         }
-        if(fixOrder.isEmpty()){
+        if(fixOrder.isEmpty()){   //there are no hubs with an impact > 0 that need repair, so return the list of 0s
             return rateOfRestoration;
         }
-        int totalPopulation = getTotalServicedPopulation();
+        int totalPopulation = getTotalServicedPopulation();   //get the total amount of people being serviced by at least one hub (excluding postal codes that are not serviced by any hubs [see design decisions in external documentation ofr more details)]
         float populationOutOfServiceFloat = 0;
-        try{
+        try{   //calculate the total amount of people out of service due to a hub outage (i.e., excluding populations out of service due to not being serviced by any hubs in the first place)
             for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
                 float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());
                 populationOutOfServiceFloat += entry.getValue().getPopulation() * postalCodePopOutOfService;
@@ -634,35 +693,33 @@ public class PowerService{
         catch(SQLException e){
             throw new SQLException("SQL join/select from PostalHubRelations and DistributionHubs failed!\nSource: peopleOutOfService\nDetails: " + e.getMessage());
         }
-        int populationOutOfService = (int) Math.ceil(populationOutOfServiceFloat);
-        if(populationOutOfService==0 /*|| totalPopulation==0*/){
+        int populationOutOfService = (int) Math.ceil(populationOutOfServiceFloat);   //round up the population out of service
+        if(populationOutOfService==0){   //no people are out of service due to a hub outage, so return the list of 0s
             return rateOfRestoration;
         }
         rateOfRestoration.clear();
         double percentageOfInServicePop = (((double) totalPopulation)- ((double) populationOutOfService)) / ((double) totalPopulation);
-        double alreadyHavePowerIncrements = Math.floor(percentageOfInServicePop/increment);
-        float currIncrement = 0;
-        for(int i=0; i<=alreadyHavePowerIncrements; i++){
+        double alreadyHavePowerIncrements = Math.floor(percentageOfInServicePop/increment);   //calculate how many "increments" of the population already have power
+        float currIncrement = 0;   //variable to store the current increment we are operating on
+        for(int i=0; i<=alreadyHavePowerIncrements; i++){   //add 0s to the list to indicate how many "increments" of the population already have power before performing any repairs
             rateOfRestoration.add(0);
-            currIncrement += increment;
+            currIncrement += increment;   //update current increment
         }
-        float repairTimeElapsed = 0;
-        int lastRepairTimePerformed = 0;
-        if(currIncrement>1){
+        if(currIncrement>1){   //reset current increment to 1 if it has gone over 1 (i.e., when increment is 0.6)
             currIncrement = 1;
         }
-        for(int i=0; i<fixOrder.size(); i++){
+        float repairTimeElapsed = 0;
+        for(int i=0; i<fixOrder.size(); i++){   //iterate through the hubs that need repair (sorted by their impacts in descending order)
             repairTimeElapsed += fixOrder.get(i).getRepairTime();
-            lastRepairTimePerformed = (int) Math.ceil(repairTimeElapsed);
-            percentageOfInServicePop += ((double) fixOrder.get(i).getPopulationEffected()) / ((double) totalPopulation);
-            while(percentageOfInServicePop>=currIncrement){
+            percentageOfInServicePop += ((double) fixOrder.get(i).getPopulationEffected()) / ((double) totalPopulation);   //calculate the new percentage of population in service after this hub is repaired
+            while(percentageOfInServicePop>=currIncrement){   //add elapsedRepairTime(s) to the list to indicate how many new "increments" of the population are in service after this repair
                 if(currIncrement==1){
                     rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
                     currIncrement = -1;
                     break;
                 }
                 rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
-                if(currIncrement+increment>1){
+                if(currIncrement+increment>1){    //reset current increment to 1 if it has gone over 1 (i.e., when increment is 0.6)
                     currIncrement = 1;
                 }
                 else{
@@ -670,36 +727,39 @@ public class PowerService{
                 }
             }
         }
-        while(rateOfRestoration.size()<listSize){    //in case percentageOfInService is 0.9999999 (floating point inaccuracy) but should be 1
-            rateOfRestoration.add(lastRepairTimePerformed);
+        while(rateOfRestoration.size()<listSize){    //in case percentage of in service population is 0.9999999 but should be 1 (floating point calculation inaccuracy)
+            rateOfRestoration.add((int) Math.ceil(repairTimeElapsed));
         }
         return rateOfRestoration;
     }
 
 
+
+
+    //this method is used during rateOfRestoration. It calculates and returns the total population that is serviced by at least on hub
     private int getTotalServicedPopulation(){
         int totalPopulation = 0;
-        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
-            for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){
+        for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){   //iterate through all the postal codes in the postalCodes map
+            for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){   //iterate through all the distribution hubs in the distributionHubs map
                 Set<String> servicedAreas = hub.getValue().getServicedAreas();
                 Iterator itr = servicedAreas.iterator();
                 boolean postalIsServiced = false;
-                while(itr.hasNext()){
+                while(itr.hasNext()){   //iterate through all the postal codes stored in this hub's servicedAreas set
                     String postalCode = (String) itr.next();
-                    if(postalCode.equals(entry.getKey())){
-                        totalPopulation += entry.getValue().getPopulation();
+                    if(postalCode.equals(entry.getKey())){   //this postal code is serviced by at least one hub (since it is in this hub's servicedAreas)
+                        totalPopulation += entry.getValue().getPopulation();   //add this postal code's population to the total population
                         postalIsServiced = true;
                         break;
                     }
                 }
-                if(postalIsServiced){
+                if(postalIsServiced){   //go to the next postal code
                     break;
                 }
             }
-            //totalPopulation += entry.getValue().getPopulation();
         }
         return totalPopulation;
     }
+
 
 
 
@@ -707,12 +767,12 @@ public class PowerService{
         if(startHub==null){
             throw new IllegalArgumentException("startHub is null! \nSource: repairPlan");
         }
-        startHub = startHub.replaceAll("\\s+","");
+        startHub = startHub.replaceAll("\\s+","");  //convert starting hub id to standard format (no spaces, uppercase)
         if(startHub.equals("")){
             throw new IllegalArgumentException("startHub is empty String! \nSource: repairPlan");
         }
-        startHub = startHub.toUpperCase();
-        if(!distributionHubs.containsKey(startHub)){
+        startHub = startHub.toUpperCase();   //convert starting hub id to standard format (no spaces, uppercase)
+        if(!distributionHubs.containsKey(startHub)){   //check if the starting hub exists
             throw new IllegalArgumentException("startHub does not exist (has not been added)!\nSource: repairPlan");
         }
         if(maxDistance<0){
@@ -763,8 +823,9 @@ public class PowerService{
         else{
             RepairPlanGrid repairPlanGrid = new RepairPlanGrid(firstHub, endHub, intermediateHubs);
             List<List<HubImpact>> pathCombinations = new ArrayList<>();
+            PowerSets powerSet = new PowerSets();
+            List<List<HubImpact>> hubSubsets = powerSet.calculateHubSubsets(intermediateHubs);
             HubPathCombinations combinations = new HubPathCombinations();
-            List<List<HubImpact>> hubSubsets = combinations.calculateHubSubsets(intermediateHubs);
             hubSubsets.remove(0);
             for(int i=0; i<hubSubsets.size(); i++){
                 pathCombinations.addAll(combinations.getPathCombinations(hubSubsets.get(i)));
@@ -870,9 +931,4 @@ public class PowerService{
         repairPlan.add(endHub);
         return repairPlan;
     }
-
-
-
-    //no two hubs same location (assumption [methods implemented with this assumption] and design decision [outcome of this assumption in implementation])
-    //what if most impactful endHub is tie in impact and distance? (current implementation, just take first one --> document in design decisions)
 }

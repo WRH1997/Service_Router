@@ -1,5 +1,7 @@
 import java.util.*;
 
+//this class stores distribution hubs
+//that is to say, each distribution hub will be stored in an object of this class
 public class HubImpact {
 
     private String hubId;

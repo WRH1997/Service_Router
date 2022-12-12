@@ -1,3 +1,5 @@
+//this class store the data of postal codes (whether damaged or not)
+//in other words, each postal code is stored in an object of this class
 public class DamagedPostalCodes {
 
     private String postalCodeId;
