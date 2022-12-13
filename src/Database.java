@@ -47,6 +47,7 @@ public class Database {
     }
 
 
+
     //this method returns a Connection object to the database. It is meant to reduce redundant code since each method needs to
     //establish a connection to the database
     private Connection getConnection() throws SQLException{
@@ -59,6 +60,8 @@ public class Database {
         }
         return conn;
     }
+
+
 
 
     //this method is invoked during PowerService's constructor and returns all the postal codes stored in the database's PostalCodes table
@@ -86,6 +89,8 @@ public class Database {
     }
 
 
+
+
     //this method calculates a postal code's total repair time by cross-referencing between the PostalHubRelation and DistributionHubs tables.
     //it is used during various PowerService methods
     float calculatePostalRepairTime(String postalCode) throws SQLException{
@@ -110,6 +115,8 @@ public class Database {
         }
         return postalRepairTime;
     }
+
+
 
 
     //this method is invoked during PowerService's constructor and returns all the distribution hubs stored in the database's DistributionHubs table
@@ -159,24 +166,28 @@ public class Database {
 
 
 
+
     //this method is used by various PowerService methods and by this class's getDistributionHubsFromDB method.
     //It calculates the total number of people affected by a hub's outage (i.e., for a given hub, how many people are out of power because of its outage)
     float calculatePopulationEffected(String hubId, Set<String> servicedAreas) throws SQLException{
         float populationEffected = 0;
         Iterator itr = servicedAreas.iterator();
-        while(itr.hasNext()){
+        while(itr.hasNext()){    //iterate through this hub's serviced postal codes
             String postalCode = (String) itr.next();
             try{
                 Connection conn = getConnection();
                 Statement statement = conn.createStatement();
                 statement.execute(useDB);
+                //get the population of this postal code
                 ResultSet postalPop = statement.executeQuery("select population from PostalCodes where id = '" + postalCode + "';");
                 float postalPopulation = 0;
                 while(postalPop.next()){
                     postalPopulation = (float) postalPop.getInt("population");
                 }
                 postalPop.close();
+                //get the total number of hubs that service this postal code
                 float postalHubs = getNumberOfPostalHubs(postalCode);
+                //calculate the fraction of this postal code's population that is affected by this hub's outage
                 populationEffected += postalPopulation * (1/postalHubs);
                 postalPop.close();
                 statement.close();
@@ -190,12 +201,17 @@ public class Database {
     }
 
 
+
+
+    //this method finds and returns the total number of hubs that service a postal code.
+    //It is used during PowerService's underservedPostalByPopulation, underservedPostalByArea, and this class's calculatePopulationEffected methods
     float getNumberOfPostalHubs(String postalCode) throws SQLException{
         float postalHubs = 0;
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //get the count of rows returned for this postal code in the PostalHubRelation table (where each entry is a unique relation between a postal code and a hub servicing it)
             ResultSet res = statement.executeQuery("select count(*) as hubs from PostalHubRelation where postalId = '" + postalCode + "';");
             while(res.next()){
                 postalHubs = (float) res.getInt("hubs");
@@ -211,11 +227,15 @@ public class Database {
     }
 
 
+
+
+    //method to add postal codes provided through the addPostalCode method to the database
     void addPostalCodeToDB(DamagedPostalCodes newPostalCode) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //simple SQL insertion of new postal code's data into PostalCodes table
             statement.execute("insert into PostalCodes values('" + newPostalCode.getPostalCodeId() + "', " + newPostalCode.getPopulation() + ", " + newPostalCode.getArea() + ");");
             statement.close();
             conn.close();
@@ -226,14 +246,23 @@ public class Database {
     }
 
 
+
+
+    //method to establish relationship between postal code and hub servicing it by inserting
+    //the pairing into the PostalHubRelation many-to-many table
+    //this method is used during addPostalCode and addDistributionHub
     void updatePostalHubRelation(String postalCode, String hubId) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //first, check if the relationship between the postal and hub already exists
             ResultSet res = statement.executeQuery("select * from PostalHubRelation where postalId='" + postalCode + "' and hubId='" + hubId + "';");
-            //https://javarevisited.blogspot.com/2016/10/how-to-check-if-resultset-is-empty-in-Java-JDBC.html#axzz7mL7lknva
-            if(res.next()==false){
+            //CITATION NOTE: I was unsure on how to check if a ResultSet is empty, so I referenced the following URL for the boolean statement [if(res.next()==false)]:
+            //URL: https://javarevisited.blogspot.com/2016/10/how-to-check-if-resultset-is-empty-in-Java-JDBC.html#axzz7mL7lknva
+            //Accessed: December 8, 2022
+            if(res.next()==false){   //relationship does not already exist
+                //so, insert a row to represent the relationship in the PostalHubRelation table
                 statement.execute("insert into PostalHubRelation values('" + postalCode + "', '" + hubId + "');");
             }
             res.close();
@@ -246,11 +275,16 @@ public class Database {
     }
 
 
+
+
+    //method to add a new distribution hub provided through the addDistributionHub method
+    //to the database's DistributionHubs table
     void addDistributionHubToDB(HubImpact newHub) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //simple SQL insert of new hub's data into DistributionHubs table
             statement.execute("insert into DistributionHubs values('" + newHub.getHubId() + "', " + newHub.getLocation().getX() + ", " +newHub.getLocation().getY() + ", " + 0 + ", " + true + ");");
             statement.close();
             conn.close();
@@ -261,11 +295,14 @@ public class Database {
     }
 
 
+
+    //method to update a hub's damage as a result of hubDamage being called
     void updateHubDamage(String hubId, float repairTime) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //simple SQL update command to reflect changes in a hub's repair time and inService attributes in the DistributionHubs table
             statement.execute("update DistributionHubs set repairTIme = repairTime + " + repairTime + ", inService = false where id = '" + hubId + "';");
             statement.close();
             conn.close();
@@ -277,15 +314,20 @@ public class Database {
 
 
 
-    float postalPopulationWithHubOutOfService(String postalCode) throws SQLException{
+
+    //method to find the fraction of a postal code's hubs that are down (i.e., if a postal code has 4 hubs servicing it and 2 are down,
+    //then this method returns 0.5). This method is used to calculate the number of people in a postal code that are out of power due to
+    //hub outages in peopleOutOfService and rateOfRestoration
+    float percentageOfPostalDamagedHubs(String postalCode) throws SQLException{
         int totalHubs = 0;
         int damagedHubs = 0;
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //join between PostalHubRelation and DistributionHubs on this postal code to get the information of each of the hubs that service this postal code
             ResultSet res = statement.executeQuery("select * from PostalHubRelation join DistributionHubs on PostalHubRelation.hubId=DistributionHubs.id where PostalHubRelation.postalId = '" + postalCode + "';");
-            while(res.next()){
+            while(res.next()){   //iterate through the hubs that service this postal
                 totalHubs++;
                 boolean inService = res.getBoolean("inService");
                 if(!inService){
@@ -296,21 +338,29 @@ public class Database {
         catch(SQLException e){
             throw e;
         }
-        if(totalHubs==0){
+        if(totalHubs==0){   //check if this postal is not being serviced by any hubs
             return 0;
         }
+        //calculate the fraction of downed hubs servicing this postal code
         float downedHubPercentage = ((float) damagedHubs)/((float)totalHubs);
         return downedHubPercentage;
     }
 
 
+
+
+    //method to find the total population that is out of service due to not being serviced by any hubs.
+    //This method is needed due in specialized situations that arise from design decisions made during the implementation
+    //of this program (see  external document for more detail)
     float postalPopulationWithoutHubOutOfService() throws SQLException{
         int populationOutOfService = 0;
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //left join PostalCodes and PostalHubRelation tables to find which postal code does not have corresponding entries in the PostalHubRelation table (i.e., it does not have any corresponding servicing hubs)
             ResultSet res = statement.executeQuery("select * from PostalCodes left join PostalHubRelation on PostalCodes.id = PostalHubRelation.postalId where hubId is null");
+            //tally the populations of all such postal codes
             while(res.next()){
                 populationOutOfService += res.getInt("population");
             }
@@ -321,11 +371,16 @@ public class Database {
         return populationOutOfService;
     }
 
+
+
+
+    //method to log a repair done by an employee during hubRepair into the RepairLog table
     void updateRepairLog(String employeeId, String hubId, float repairTime, boolean inService) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //simple SQL insert of new repair's information into the RepairLog table
             statement.execute("insert into RepairLog values (null, '" + employeeId + "', '" + hubId + "', " + repairTime + "," + inService + ");");
             statement.close();
             conn.close();
@@ -336,11 +391,15 @@ public class Database {
     }
 
 
+
+
+    //method to update a hub's status as a result of repairHub being called
     void applyHubRepairToDB(String hubId, float repairTime, boolean inService) throws SQLException{
         try{
             Connection conn = getConnection();
             Statement statement = conn.createStatement();
             statement.execute(useDB);
+            //simple SQL update command to reflect changes to hub's repairTime and inService attributes in the DistributionHubs table
             statement.execute("update DistributionHubs set repairTime= " + repairTime + ", inService= " + inService + " where id='" + hubId + "';");
             statement.close();
             conn.close();

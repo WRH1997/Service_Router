@@ -372,7 +372,7 @@ public class PowerService{
         float totalPeopleOutOfService = 0;   //tally variable
         try{
             for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){   //iterate through the postalCodes map
-                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());  //calculate this postal code's population without service
+                float postalCodePopOutOfService = db.percentageOfPostalDamagedHubs(entry.getKey());  //calculate this postal code's population without service
                 totalPeopleOutOfService += entry.getValue().getPopulation() * postalCodePopOutOfService;    //increment the tally by that population
             }
             //note that these calculations only take into account those postal codes that are serviced by at least one hub
@@ -686,7 +686,7 @@ public class PowerService{
         float populationOutOfServiceFloat = 0;
         try{   //calculate the total amount of people out of service due to a hub outage (i.e., excluding populations out of service due to not being serviced by any hubs in the first place)
             for(Map.Entry<String, DamagedPostalCodes> entry: postalCodes.entrySet()){
-                float postalCodePopOutOfService = db.postalPopulationWithHubOutOfService(entry.getKey());
+                float postalCodePopOutOfService = db.percentageOfPostalDamagedHubs(entry.getKey());
                 populationOutOfServiceFloat += entry.getValue().getPopulation() * postalCodePopOutOfService;
             }
         }
@@ -781,107 +781,143 @@ public class PowerService{
         if(maxTime<0){
             throw new IllegalArgumentException("maxTime is negative (invalid)!\nSource: repairPlan");
         }
+        //get startHub and add it as the first hub in the repairPlan
         HubImpact firstHub = distributionHubs.get(startHub);
         List<HubImpact> repairPlan = new ArrayList<>();
         repairPlan.add(firstHub);
+        //now, we calculate the hubs within <maxDistance> of startHub
         int firstHubX = firstHub.getLocation().getX();
         int firstHubY = firstHub.getLocation().getY();
         List<HubImpact> hubsInRange = new ArrayList<>();
-        HubImpact endHub = null;
-        float highestImpact = -1;
-        for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){
-            if(hub.getValue().getInService()){
+        float highestImpact = -1;   //variable to store highest impact value of inRange hubs found so far
+        HubImpact endHub = null;   //variable to store endHub based on the highest impact inRange hub found so far
+        double furthestDistance = -1; //variable to store distance of endHub from startHub
+        for(Map.Entry<String, HubImpact> hub: distributionHubs.entrySet()){   //iterate through the hubs in distributionHubs to find the hubs that are within <maxDistance> of startHub
+            if(hub.getValue().getInService()){   //skips hubs already in service
                 continue;
             }
-            if(hub.getValue().getHubId().equals(firstHub.getHubId())){
+            if(hub.getValue().getHubId().equals(firstHub.getHubId())){   //skip startHub
                 continue;
             }
             HubImpact potentialHub = hub.getValue();
             int potentialHubX = potentialHub.getLocation().getX();
             int potentialHubY = potentialHub.getLocation().getY();
+            //calculate distance of this hub from startHub using Pythagorean theorem (c^2 = a^2 + b^2)
             double distanceFromStart = Math.sqrt(Math.pow((potentialHubX - firstHubX), 2) + Math.pow((potentialHubY - firstHubY), 2));
-            if(distanceFromStart<=(double)maxDistance){
+            if(distanceFromStart<=(double)maxDistance){   //hub is within range
                 hubsInRange.add(hub.getValue());
-                if(hub.getValue().getImpact()>highestImpact){
+                //check if this hub has the highest impact so far. If it does, then it becomes the new endHub
+                //OR, if this hub's impact is equal to the highest impact, then check if it is further than the currently designated endHub
+                //since further distance is the tie-breaker between potential endHubs that are equal in impact (see design decisions in external documentation for more details)
+                if(hub.getValue().getImpact()>highestImpact || (hub.getValue().getImpact()==highestImpact && distanceFromStart>furthestDistance)){
                     endHub = hub.getValue();
                     highestImpact = hub.getValue().getImpact();
                 }
             }
         }
+        //there are no hubs in range of startHub, so return list containing only startHub
         if(hubsInRange.isEmpty()){
             return repairPlan;
         }
+        //now that we have identified all hubs in range and endHub, we need to find the intermediate hubs that are
+        //between startHub and endHub (which can be repaired within <maxTime>)
         List<HubImpact> intermediateHubs = findIntermediateHubs(firstHub, endHub, hubsInRange, maxTime);
+        //if not hubs reside between startHub and endHub, then return a list consists of only startHub, endHub
         if(intermediateHubs.isEmpty()){
             repairPlan.add(endHub);
             return repairPlan;
         }
+        //in the case where startHub and endHub reside on the same x or y coordinate (forming a line between them),
+        //then there is only one possible path. So, the repair plan would be startHub, all intermediate hubs on that line
+        //between startHub and endHub, and endHub
         if(firstHubX==endHub.getLocation().getX() || firstHubY==endHub.getLocation().getY()){
             repairPlan = calculate1DRepairPlan(firstHub, endHub, intermediateHubs);
             return repairPlan;
         }
+        //otherwise, a rectangle forms between startHub and endHub. So, we need to calculate the best possible valid repair plan path between the two
         else{
+            //pass the relevant hub to a RepairPlanGrid object to create a 2d array to represent locational grid
+            //and set start, end, and intermediate hubs on it
             RepairPlanGrid repairPlanGrid = new RepairPlanGrid(firstHub, endHub, intermediateHubs);
             List<List<HubImpact>> pathCombinations = new ArrayList<>();
             PowerSets powerSet = new PowerSets();
+            //pass the set of intermediate hubs to a PowerSets object to calculate all possible subsets
+            //For example, if [A1, B2] are the intermediate hubs, then their subsets (power-set) are [[], [A1], [B2], [A1,B2]]
             List<List<HubImpact>> hubSubsets = powerSet.calculateHubSubsets(intermediateHubs);
             HubPathCombinations combinations = new HubPathCombinations();
+            //remove the empty set of the subsets (since power-sets always start with an empty set)
             hubSubsets.remove(0);
+            //pass each of the intermediate hub subsets to a HubPathCombinations object to find all possible path combinations between the intermediate
+            //hubs of a subset. For example, for the subset [A1, B2, C3], then the possible path combinations would be
+            //[A1,B2,C3], [A1,C3,B2], [B2,A1,C3], [B2,C3,A1], [C3,A1,B2], and [C3,B2,A1]
             for(int i=0; i<hubSubsets.size(); i++){
                 pathCombinations.addAll(combinations.getPathCombinations(hubSubsets.get(i)));
             }
+            //clear the repairPlan and add startHub at the beginning of it
             repairPlan.clear();
             repairPlan.add(firstHub);
-            repairPlan.addAll(repairPlanGrid.findBestRepairPath(pathCombinations, endHub));
+            //pass all possible path combinations to the RepairPlanGrid object to find the best (most impactful) valid path
+            List<HubImpact> bestPossiblePath = repairPlanGrid.findBestRepairPath(pathCombinations, endHub);
+            //add the best possible path to the repairPlan
+            repairPlan.addAll(bestPossiblePath);
+            //add endHub to the end of the repairPlan
             repairPlan.add(endHub);
             return repairPlan;
         }
     }
 
 
+
+    //method used during repairPlan that finds all the hubs that reside between startHub and endHub (i.e., that lie inside the
+    //rectangle formed between startHub and endHub)
     private List<HubImpact> findIntermediateHubs(HubImpact startHub, HubImpact endHub, List<HubImpact> hubsInRange, float maxTime){
         List<HubImpact> intermediateHubs = new ArrayList<>();
+        //get the startHub and endHub's coordinates to form rectangle between them
         int startX = startHub.getLocation().getX();
         int startY = startHub.getLocation().getY();
         int endX = endHub.getLocation().getX();
         int endY = endHub.getLocation().getY();
-        for(int i=0; i<hubsInRange.size(); i++){
-            if(hubsInRange.get(i).getHubId().equals(endHub.getHubId())){
+        for(int i=0; i<hubsInRange.size(); i++){   //iterate through all hubs in range of startHub
+            if(hubsInRange.get(i).getHubId().equals(endHub.getHubId())){   //skip endHub
                 continue;
             }
-            if(hubsInRange.get(i).getRepairTime()>maxTime){
+            if(hubsInRange.get(i).getRepairTime()>maxTime){   //skip hubs that require repair time greater than <maxTime>
                 continue;
             }
+            //get this hub's coordinates
             int intermediateX = hubsInRange.get(i).getLocation().getX();
             int intermediateY = hubsInRange.get(i).getLocation().getY();
-            if(startX>endX){
-                if(startY>endY){
+            //check whether this hub lies in the rectangle between startHub and endHub. But, to do that, we need to know whether that rectangle is in
+            //quadrant 1, 2, 3, or 4 relative to startHub. For example, if startHub is at (0,0) and endHub is at (2,2). Then the rectangle between them
+            //is situated in quadrant 1 of startHub where the diagonal line would be going towards the top right corner from startHub
+            if(startX>endX){  //rectangle is in quadrant 1 or 4 (i.e., right of startHub)
+                if(startY>endY){   //rectangle is in quadrant 1 (i.e., to the right-up of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY>=intermediateY && endY<=intermediateY){
-                            intermediateHubs.add(hubsInRange.get(i));
+                            intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
-                else{
+                else{   //rectangle is in quadrant 4 (i.e., to the right-down of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY<=intermediateY && endY>=intermediateY){
-                            intermediateHubs.add(hubsInRange.get(i));
+                            intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
             }
-            else{
-                if(startY>endY){
+            else{   //rectangle is in quadrant 2 or 3 (i.e., to left of startHub)
+                if(startY>endY){   //rectangle is in quadrant 2 (i.e., to the left-up of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY>=intermediateY && endY<=intermediateY){
-                            intermediateHubs.add(hubsInRange.get(i));
+                            intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
-                else{
+                else{   //rectangle is in quadrant 3 (i.e., to the left-down of startHub)
                     if(startX<=intermediateX && endX>=intermediateX){
                         if(startY<=intermediateY && endY>=intermediateY){
-                            intermediateHubs.add(hubsInRange.get(i));
+                            intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
@@ -891,30 +927,44 @@ public class PowerService{
     }
 
 
+
+    //method used during repairPlan when the startHub and endHub have the same x or y coordinate (forming a line between the two)
+    //thus, there can only be one possible path (i.e., that line) and this method calculates and returns the repairPlan that corresponds
+    //to that line (i.e., startHub, intermediate hubs on that line in order, endHub)
     private List<HubImpact> calculate1DRepairPlan(HubImpact startHub, HubImpact endHub, List<HubImpact> intermediateHubs){
+        //first, we need to know whether startHub and endHub lie on the same x or y coordinate
         boolean xIsEqual = false;
         if(startHub.getLocation().getX()==endHub.getLocation().getX()){
             xIsEqual = true;
         }
         List<Integer> intermediateCoordinates = new ArrayList<>();
+        //then, we add all the intermediate hub's x or y coordinates to a list depending on whether startHub and endHub share the same x or y coordinate
         for(int i=0; i<intermediateHubs.size(); i++){
-            if(xIsEqual){
-                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getY());
+            if(xIsEqual){   //startHub and endHub share the same x coordinate
+                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getY());   //add all intermediate hub y coordinates to list
             }
-            else{
-                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getX());
+            else{   //startHub and endHub share the same y coordinate
+                intermediateCoordinates.add(intermediateHubs.get(i).getLocation().getX());   //add all intermediate hub x coordinates to list
             }
         }
+        //now, we sort the list of intermediate hub x or y coordinates in ascending order
         Collections.sort(intermediateCoordinates);
+        //however, now we may need to reverse the order of the list to descending order if the path between startHub and endHub
+        //goes backwards horizontally or downwards vertically
+        //For example, if startHub is (0,0) and endHub is (0,-6), then the list of intermediate hub y coordinates needs to be reversed to descending order
+        //since the path goes downwards from startHub towards endHub
         if(xIsEqual && (startHub.getLocation().getX()>endHub.getLocation().getX())){
             Collections.reverse(intermediateCoordinates);
         }
         else if(!xIsEqual && (startHub.getLocation().getY()>endHub.getLocation().getY())){
             Collections.reverse(intermediateCoordinates);
         }
+        //create a list for repairPlan and store startHub at the beginning
         List<HubImpact> repairPlan = new ArrayList<>();
         repairPlan.add(startHub);
+        //iterate through the sorted list of intermediate hub x or y coordinates
         for(int i=0; i<intermediateCoordinates.size(); i++){
+            //match this coordinate with its intermediate hub and add it to the repairPlan list
             for(int k=0; k<intermediateHubs.size(); k++){
                 if(!xIsEqual){
                     if(intermediateHubs.get(k).getLocation().getX()==intermediateCoordinates.get(i)){
@@ -928,6 +978,7 @@ public class PowerService{
                 }
             }
         }
+        //finally, add endHub to the end of that list
         repairPlan.add(endHub);
         return repairPlan;
     }
