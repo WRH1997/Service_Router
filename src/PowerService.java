@@ -890,15 +890,15 @@ public class PowerService{
             //check whether this hub lies in the rectangle between startHub and endHub. But, to do that, we need to know whether that rectangle is in
             //quadrant 1, 2, 3, or 4 relative to startHub. For example, if startHub is at (0,0) and endHub is at (2,2). Then the rectangle between them
             //is situated in quadrant 1 of startHub where the diagonal line would be going towards the top right corner from startHub
-            if(startX>endX){  //rectangle is in quadrant 1 or 4 (i.e., right of startHub)
-                if(startY>endY){   //rectangle is in quadrant 1 (i.e., to the right-up of startHub)
+            if(startX>endX){  //rectangle is in quadrant 2 or 3 (i.e., left of startHub)
+                if(startY>endY){   //rectangle is in quadrant 3 (i.e., to the lower-left of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY>=intermediateY && endY<=intermediateY){
                             intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
-                else{   //rectangle is in quadrant 4 (i.e., to the right-down of startHub)
+                else{   //rectangle is in quadrant 2 (i.e., to the upper-left of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY<=intermediateY && endY>=intermediateY){
                             intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
@@ -906,15 +906,15 @@ public class PowerService{
                     }
                 }
             }
-            else{   //rectangle is in quadrant 2 or 3 (i.e., to left of startHub)
-                if(startY>endY){   //rectangle is in quadrant 2 (i.e., to the left-up of startHub)
+            else{   //rectangle is in quadrant 1 or 4 (i.e., to right of startHub)
+                if(startY>endY){   //rectangle is in quadrant 4 (i.e., to the lower-right of startHub)
                     if(startX>=intermediateX && endX<=intermediateX){
                         if(startY>=intermediateY && endY<=intermediateY){
                             intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle
                         }
                     }
                 }
-                else{   //rectangle is in quadrant 3 (i.e., to the left-down of startHub)
+                else{   //rectangle is in quadrant 1 (i.e., to the upper-right of startHub)
                     if(startX<=intermediateX && endX>=intermediateX){
                         if(startY<=intermediateY && endY>=intermediateY){
                             intermediateHubs.add(hubsInRange.get(i));   //this hub resides within the rectangle

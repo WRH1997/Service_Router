@@ -2,12 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="7d4c11d7-065a-407d-bb77-0ef2c84df957" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Database.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/Database.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/HubPathCombinations.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/HubPathCombinations.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/PowerService.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/PowerService.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/PowerSets.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/PowerSets.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -71,7 +67,7 @@
       <workItem from="1670350068130" duration="1751000" />
       <workItem from="1670453008020" duration="179000" />
       <workItem from="1670783970340" duration="24000" />
-      <workItem from="1670789395038" duration="25753000" />
+      <workItem from="1670789395038" duration="33155000" />
     </task>
     <servers />
   </component>
