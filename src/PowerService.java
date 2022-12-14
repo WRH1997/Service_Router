@@ -775,6 +775,9 @@ public class PowerService{
         if(!distributionHubs.containsKey(startHub)){   //check if the starting hub exists
             throw new IllegalArgumentException("startHub does not exist (has not been added)!\nSource: repairPlan");
         }
+        if(distributionHubs.get(startHub).getInService()){
+            throw new IllegalArgumentException("startHub is already in service (invalid)!\nSource: repairPlan");
+        }
         if(maxDistance<0){
             throw new IllegalArgumentException("maxDistance is negative (invalid)!\nSource: repairPlan");
         }
